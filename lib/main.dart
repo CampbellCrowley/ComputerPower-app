@@ -1,10 +1,14 @@
+import 'dart:convert';
+import 'dart:math';
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_signin_button/flutter_signin_button.dart';
 import 'package:charts_flutter/flutter.dart';
+import 'package:http/http.dart' as http;
 
 void main() {
   runApp(MyApp());
@@ -155,35 +159,44 @@ class _MainView extends StatefulWidget {
 class _MainState extends State<_MainView> {
   _MainState();
 
-  int selectedComputer = 0;
+  String selectedComputer = null;
 
-  // TODO: Temporary example data until I fetch from the API.
-  final List<Map> computerData = [
-    {
-      "id": 0,
-      "name": 'My Desktop #1',
-      "currentState": "On",
-      "previousStateChange": "Mon 04-26 07:56:16",
-      "now": "Mon Apr 26 2021 14:37:07 GMT-0800 (AKDT)",
-      "history": <double>[55.32, 62.74, 61.84, 60.12, 69.36, 56.75, 67.28]
-    },
-    {
-      "id": 1,
-      "name": 'My Desktop #2',
-      "currentState": "On",
-      "previousStateChange": "Mon 04-26 07:56:16",
-      "now": "Mon Apr 26 2021 14:37:07 GMT-0800 (AKDT)",
-      "history": <double>[55.32, 62.74, 61.84, 60.12, 69.36, 56.75, 67.28]
-    },
-    {
-      "id": 2,
-      "name": 'My Desktop #3',
-      "currentState": "On",
-      "previousStateChange": "Mon 04-26 07:56:16",
-      "now": "Mon Apr 26 2021 14:37:07 GMT-0800 (AKDT)",
-      "history": <double>[55.32, 62.74, 61.84, 60.12, 69.36, 56.75, 67.28]
-    }
-  ];
+  List deviceList = [];
+  Map deviceInfo = null;
+
+  Future<List> fetchDeviceList() async {
+    return widget.user.getIdToken().then((token) {
+      http.Client client = http.Client();
+      return client.get(
+          Uri.parse('https://dev.campbellcrowley.com/pc2/api/get-devices'),
+          headers: {'Authorization': token});
+    }).then((res) {
+      if (res.statusCode == 200) {
+        final parsed = jsonDecode(res.body);
+        // print(parsed);
+        return parsed["data"];
+      } else {
+        return [];
+      }
+    });
+  }
+
+  Future<Map> fetchDeviceInfo(String did) async {
+    return widget.user.getIdToken().then((token) {
+      http.Client client = http.Client();
+      return client.get(
+          Uri.parse('https://dev.campbellcrowley.com/pc2/api/get-info/${did}'),
+          headers: {'Authorization': token});
+    }).then((res) {
+      if (res.statusCode == 200) {
+        final parsed = jsonDecode(res.body);
+        // print(parsed);
+        return parsed["data"];
+      } else {
+        return null;
+      }
+    });
+  }
 
   @override
   void initState() {
@@ -191,14 +204,32 @@ class _MainState extends State<_MainView> {
       Future(() => Navigator.pushReplacement(
           context, MaterialPageRoute(builder: (context) => MyHomePage())));
     }
+    fetchDeviceList().then((dList) {
+      setState(() {
+        deviceList = dList;
+      });
+    });
+
+    new Timer.periodic(Duration(seconds: 10), (t) {
+      if (selectedComputer == null) return;
+      fetchDeviceInfo(selectedComputer).then((dInfo) {
+        setState(() {
+          deviceInfo = dInfo;
+        });
+      });
+    });
+
     super.initState();
   }
 
-  void selectComputer(BuildContext context, int index) {
-    setState(() {
-      selectedComputer = index;
+  void selectComputer(BuildContext context, String did) {
+    fetchDeviceInfo(did).then((dInfo) {
+      setState(() {
+        selectedComputer = did;
+      });
+      deviceInfo = dInfo;
+      Navigator.pop(context);
     });
-    Navigator.pop(context);
   }
 
   List<Widget> getDrawerChildren(BuildContext context) {
@@ -213,17 +244,29 @@ class _MainState extends State<_MainView> {
         ),
       ),
     ];
-    for (int i = 0; i < computerData.length; i++) {
-      Map el = computerData[i];
+    for (int i = 0; i < deviceList.length; i++) {
+      Map el = deviceList[i];
       drawer.add(
         ListTile(
-          title: Text(el["name"]),
-          onTap: () => selectComputer(context, i),
-          tileColor: i == selectedComputer ? Colors.lightBlue : Colors.white,
+          title: Text(el["dName"]),
+          onTap: () => selectComputer(context, el["dId"]),
+          tileColor:
+              el["dId"] == selectedComputer ? Colors.lightBlue : Colors.white,
         ),
       );
     }
     return drawer;
+  }
+
+  String stateToString(int state) {
+    switch (state) {
+      case 0:
+        return 'Off';
+      case 1:
+        return 'On';
+      default:
+        return 'Unknown';
+    }
   }
 
   @override
@@ -231,12 +274,23 @@ class _MainState extends State<_MainView> {
     if (widget.user == null) {
       return Text("Unknown user...");
     }
-    Map comp = computerData[selectedComputer];
-    List<MapEntry<int, double>> data = comp["history"].asMap().entries.toList();
+    Map comp = deviceInfo;
+    Map meta;
+    try {
+      meta = deviceList
+          .firstWhere((element) => element["dId"] == selectedComputer);
+    } catch (err) {
+      // Not found.
+    }
+    List<MapEntry<int, dynamic>> data =
+        (comp != null ? comp["summary"] : <double>[0, 0, 0, 0, 0, 0, 0])
+            .asMap()
+            .entries
+            .toList();
     // print(data);
     List<Series<MapEntry, String>> seriesList = [
       new Series<MapEntry, String>(
-          id: 'Power Percentage',
+          id: '% Uptime',
           domainFn: (MapEntry el, _) {
             final List<String> days = [
               "Sun",
@@ -252,14 +306,14 @@ class _MainState extends State<_MainView> {
           },
           measureFn: (MapEntry el, _) {
             // print('Measure: ${el.value}');
-            return el.value;
+            return max(min(el.value * 100, 100), 0);
           },
           data: data)
     ];
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(comp["name"]),
+        title: Text(meta != null ? meta["dName"] : 'No Device'),
         actions: [
           IconButton(
               onPressed: () {
@@ -305,7 +359,7 @@ class _MainState extends State<_MainView> {
               ],
             ),
             Text(
-              'Current State: ${comp["currentState"]}',
+              'Current State: ${comp != null ? stateToString(comp["currentState"]) : 'Unknown'}',
               style: Theme.of(context).textTheme.subtitle1,
             ),
           ],
