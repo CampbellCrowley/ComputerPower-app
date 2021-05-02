@@ -5,6 +5,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_signin_button/flutter_signin_button.dart';
 import 'package:charts_flutter/flutter.dart';
@@ -18,11 +20,6 @@ void signOut(BuildContext context) async {
   await FirebaseAuth.instance.signOut();
   Navigator.pushReplacement(
       context, MaterialPageRoute(builder: (context) => MyHomePage()));
-}
-
-Future<bool> sendCommand(String cmd) async {
-  // TODO: Implement sending command to server.
-  return false;
 }
 
 class MyApp extends StatelessWidget {
@@ -59,6 +56,38 @@ class _HomePage extends State<MyHomePage> {
         if (myUser != null) {
           Navigator.pushReplacement(context,
               MaterialPageRoute(builder: (context) => _MainView(myUser)));
+        }
+      });
+
+      const AndroidNotificationChannel channel = AndroidNotificationChannel(
+          'power_state_channel',
+          'Power State Notifications',
+          'This channel is used to communicate changes in device power states.',
+          importance: Importance.max);
+
+      final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+          FlutterLocalNotificationsPlugin();
+      await flutterLocalNotificationsPlugin
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.createNotificationChannel(channel);
+
+      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+        RemoteNotification notification = message.notification;
+        AndroidNotification android = message.notification?.android;
+        if (notification != null && android != null) {
+          flutterLocalNotificationsPlugin.show(
+              notification.hashCode,
+              notification.title,
+              notification.body,
+              NotificationDetails(
+                android: AndroidNotificationDetails(
+                  channel.id,
+                  channel.name,
+                  channel.description,
+                  icon: android?.smallIcon,
+                ),
+              ));
         }
       });
     } catch (e) {
@@ -163,6 +192,23 @@ class _MainState extends State<_MainView> {
 
   List deviceList = [];
   Map deviceInfo = null;
+
+  Future<bool> sendCommand(String cmd, Map body) async {
+    return widget.user.getIdToken().then((token) {
+      http.Client client = http.Client();
+      return client.post(
+          Uri.parse(
+              'https://dev.campbellcrowley.com/pc2/api/${cmd}/${selectedComputer}'),
+          headers: {'Authorization': token},
+          body: body);
+    }).then((res) {
+      if (res.statusCode == 200) {
+        return true;
+      } else {
+        return false;
+      }
+    });
+  }
 
   Future<List> fetchDeviceList() async {
     return widget.user.getIdToken().then((token) {
@@ -311,6 +357,8 @@ class _MainState extends State<_MainView> {
           data: data)
     ];
 
+    final int curState = comp == null ? -1 : comp["currentState"];
+
     return Scaffold(
       appBar: AppBar(
         title: Text(meta != null ? meta["dName"] : 'No Device'),
@@ -337,21 +385,37 @@ class _MainState extends State<_MainView> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 ElevatedButton(
+                  child: Text(curState == 0 ? 'Turn On' : 'Turn Off'),
+                  onPressed: () => sendCommand(
+                      'request-state', {"state": curState == 0 ? 1 : 0}),
+                  style: ButtonStyle(
+                      backgroundColor: MaterialStateProperty.all(
+                          curState == 0 ? Colors.green : Colors.red)),
+                ),
+              ],
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                ElevatedButton(
                   child: Text('Press Power'),
-                  onPressed: () => sendCommand('press-power'),
+                  onPressed: () =>
+                      sendCommand('press-button', {"button": 'power'}),
                   style: ButtonStyle(
                       backgroundColor: MaterialStateProperty.all(Colors.green)),
                 ),
                 ElevatedButton(
                   child: Text('Hold Power'),
-                  onPressed: () => sendCommand('hold-power'),
+                  onPressed: () =>
+                      sendCommand('hold-button', {"button": 'power'}),
                   style: ButtonStyle(
                       backgroundColor:
                           MaterialStateProperty.all(Colors.lightGreen)),
                 ),
                 ElevatedButton(
                   child: Text('Press Reset'),
-                  onPressed: () => sendCommand('press-reset'),
+                  onPressed: () =>
+                      sendCommand('press-button', {"button": 'reset'}),
                   style: ButtonStyle(
                       backgroundColor:
                           MaterialStateProperty.all(Colors.orange)),
