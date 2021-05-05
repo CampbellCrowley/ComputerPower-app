@@ -188,23 +188,34 @@ class _MainView extends StatefulWidget {
 class _MainState extends State<_MainView> {
   _MainState();
 
-  String selectedComputer = null;
-
+  String selectedComputer;
   List deviceList = [];
-  Map deviceInfo = null;
+  Map deviceInfo;
+  String responseMessage;
+
+  final Map resetButton = {"button": 'reset'};
+  final Map powerButton = {"button": 'power'};
 
   Future<bool> sendCommand(String cmd, Map body) async {
+    print('Sending command $cmd: ${jsonEncode(body)}');
     return widget.user.getIdToken().then((token) {
       http.Client client = http.Client();
       return client.post(
           Uri.parse(
-              'https://dev.campbellcrowley.com/pc2/api/${cmd}/${selectedComputer}'),
-          headers: {'Authorization': token},
-          body: body);
+              'https://dev.campbellcrowley.com/pc2/api/$cmd/$selectedComputer'),
+          headers: {'Authorization': token, 'Content-type': 'application/json'},
+          body: jsonEncode(body));
     }).then((res) {
+      print('$cmd response: ${res.body}');
       if (res.statusCode == 200) {
+        setState(() {
+          responseMessage = '$cmd succeeded!';
+        });
         return true;
       } else {
+        setState(() {
+          responseMessage = '$cmd failed!\n${res.body}';
+        });
         return false;
       }
     });
@@ -231,14 +242,21 @@ class _MainState extends State<_MainView> {
     return widget.user.getIdToken().then((token) {
       http.Client client = http.Client();
       return client.get(
-          Uri.parse('https://dev.campbellcrowley.com/pc2/api/get-info/${did}'),
+          Uri.parse('https://dev.campbellcrowley.com/pc2/api/get-info/$did'),
           headers: {'Authorization': token});
     }).then((res) {
       if (res.statusCode == 200) {
         final parsed = jsonDecode(res.body);
+        setState(() {
+          responseMessage =
+              'Data Updated\n${DateTime.now().toString().split('.')[0]}';
+        });
         // print(parsed);
         return parsed["data"];
       } else {
+        setState(() {
+          responseMessage = 'Failed to fetch device info!\n${res.body}';
+        });
         return null;
       }
     });
@@ -254,6 +272,11 @@ class _MainState extends State<_MainView> {
       setState(() {
         deviceList = dList;
       });
+      if (selectedComputer == null) {
+        String did = deviceList[0]["dId"];
+        print("No device selected, selecting $did");
+        selectComputer(context, did, pop: false);
+      }
     });
 
     new Timer.periodic(Duration(seconds: 10), (t) {
@@ -268,13 +291,13 @@ class _MainState extends State<_MainView> {
     super.initState();
   }
 
-  void selectComputer(BuildContext context, String did) {
+  void selectComputer(BuildContext context, String did, {bool pop = true}) {
     fetchDeviceInfo(did).then((dInfo) {
       setState(() {
         selectedComputer = did;
       });
       deviceInfo = dInfo;
-      Navigator.pop(context);
+      if (pop) Navigator.pop(context);
     });
   }
 
@@ -377,9 +400,55 @@ class _MainState extends State<_MainView> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.start,
           children: <Widget>[
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  meta == null ? '...' : meta["dName"],
+                  style: Theme.of(context).textTheme.headline4,
+                ),
+              ],
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  ' is currently ',
+                  style: Theme.of(context).textTheme.headline5,
+                ),
+              ],
+            ),
+            Container(
+              color: comp == null
+                  ? Colors.grey
+                  : (comp["currentState"] == 0
+                      ? Colors.red
+                      : (comp["currentState"] == 1
+                          ? Colors.green
+                          : Colors.grey)),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    comp != null
+                        ? stateToString(comp["currentState"])
+                        : 'Unknown',
+                    style: Theme.of(context).textTheme.headline3,
+                  )
+                ],
+              ),
+            ),
+            Container(
+              color: Colors.black,
+              height: 4,
+            ),
             Container(
               height: 200.0,
               child: BarChart(seriesList, animate: true),
+            ),
+            Container(
+              color: Colors.black,
+              height: 4,
             ),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -399,33 +468,42 @@ class _MainState extends State<_MainView> {
               children: [
                 ElevatedButton(
                   child: Text('Press Power'),
-                  onPressed: () =>
-                      sendCommand('press-button', {"button": 'power'}),
+                  onPressed: () => sendCommand('press-button', powerButton),
                   style: ButtonStyle(
                       backgroundColor: MaterialStateProperty.all(Colors.green)),
                 ),
                 ElevatedButton(
                   child: Text('Hold Power'),
-                  onPressed: () =>
-                      sendCommand('hold-button', {"button": 'power'}),
+                  onPressed: () => sendCommand('hold-button', powerButton),
                   style: ButtonStyle(
                       backgroundColor:
                           MaterialStateProperty.all(Colors.lightGreen)),
                 ),
                 ElevatedButton(
                   child: Text('Press Reset'),
-                  onPressed: () =>
-                      sendCommand('press-button', {"button": 'reset'}),
+                  onPressed: () => sendCommand('press-button', resetButton),
                   style: ButtonStyle(
                       backgroundColor:
                           MaterialStateProperty.all(Colors.orange)),
                 ),
               ],
             ),
-            Text(
-              'Current State: ${comp != null ? stateToString(comp["currentState"]) : 'Unknown'}',
-              style: Theme.of(context).textTheme.subtitle1,
+            Container(
+              color: Colors.black,
+              height: 4,
             ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Flexible(
+                  child: Text(
+                    responseMessage ?? '',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyText1,
+                  ),
+                ),
+              ],
+            )
           ],
         ),
       ),
