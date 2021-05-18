@@ -11,6 +11,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_signin_button/flutter_signin_button.dart';
 import 'package:charts_flutter/flutter.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   runApp(MyApp());
@@ -21,6 +22,8 @@ void signOut(BuildContext context) async {
   Navigator.pushReplacement(
       context, MaterialPageRoute(builder: (context) => MyHomePage()));
 }
+
+SharedPreferences prefs;
 
 class MyApp extends StatelessWidget {
   @override
@@ -49,6 +52,10 @@ class _HomePage extends State<MyHomePage> {
   bool _loading = false;
 
   void initializeFlutterFire() async {
+    prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool('notifications_enabled') == null) {
+      prefs.setBool('notifications_enabled', true);
+    }
     try {
       await Firebase.initializeApp();
       setState(() => _initialized = true);
@@ -67,12 +74,19 @@ class _HomePage extends State<MyHomePage> {
 
       final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
           FlutterLocalNotificationsPlugin();
+      final InitializationSettings initializationSettings =
+          InitializationSettings(
+              android: AndroidInitializationSettings('@mipmap/ic_launcher'));
+      flutterLocalNotificationsPlugin.initialize(initializationSettings);
       await flutterLocalNotificationsPlugin
           .resolvePlatformSpecificImplementation<
               AndroidFlutterLocalNotificationsPlugin>()
           ?.createNotificationChannel(channel);
 
-      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
+        SharedPreferences prefs = await SharedPreferences.getInstance();
+        if (!prefs.getBool('notifications_enabled')) return;
+
         RemoteNotification notification = message.notification;
         AndroidNotification android = message.notification?.android;
         if (notification != null && android != null) {
@@ -351,11 +365,12 @@ class _MainState extends State<_MainView> {
     } catch (err) {
       // Not found.
     }
-    List<MapEntry<int, dynamic>> data =
-        (comp != null ? comp["summary"] : <double>[0, 0, 0, 0, 0, 0, 0])
-            .asMap()
-            .entries
-            .toList();
+    List<MapEntry<int, dynamic>> data = (comp != null
+            ? comp["summary"]
+            : <double>[1, 0.8, 0.6, 0.4, 0.2, 0.1, 0])
+        .asMap()
+        .entries
+        .toList();
     // print(data);
     List<Series<MapEntry, String>> seriesList = [
       new Series<MapEntry, String>(
@@ -516,7 +531,14 @@ class _MainState extends State<_MainView> {
   }
 }
 
-class _SettingsView extends StatelessWidget {
+class _SettingsView extends StatefulWidget {
+  @override
+  State<StatefulWidget> createState() {
+    return _SettingsState();
+  }
+}
+
+class _SettingsState extends State<_SettingsView> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -529,6 +551,52 @@ class _SettingsView extends StatelessWidget {
               subtitle: ElevatedButton(
                 child: Text('Sign Out'),
                 onPressed: () => signOut(context),
+              ),
+            ),
+            SwitchListTile(
+                title: const Text('Notifications Enabled'),
+                value: prefs.getBool('notifications_enabled') ?? false,
+                onChanged: (bool value) {
+                  print('Toggled notifications ' + (value ? 'On' : 'Off'));
+                  setState(() {
+                    prefs.setBool('notifications_enabled', value);
+                  });
+                }),
+            ListTile(
+              subtitle: ElevatedButton(
+                child: Text('Test Notification'),
+                onPressed: () async {
+                  SharedPreferences prefs =
+                      await SharedPreferences.getInstance();
+                  if (!prefs.getBool('notifications_enabled')) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Notifications disabled!')));
+                  } else {
+                    final FlutterLocalNotificationsPlugin
+                        flutterLocalNotificationsPlugin =
+                        FlutterLocalNotificationsPlugin();
+                    const AndroidNotificationChannel channel =
+                        AndroidNotificationChannel(
+                            'power_state_channel',
+                            'Power State Notifications',
+                            'This channel is used to communicate changes in device power states.',
+                            importance: Importance.max);
+                    await flutterLocalNotificationsPlugin
+                        .resolvePlatformSpecificImplementation<
+                            AndroidFlutterLocalNotificationsPlugin>()
+                        ?.createNotificationChannel(channel);
+                    flutterLocalNotificationsPlugin.show(
+                        0,
+                        'Test Notification!',
+                        'Notifications will appear here as your devices change power state!',
+                        NotificationDetails(
+                            android: AndroidNotificationDetails(
+                          channel.id,
+                          channel.name,
+                          channel.description,
+                        )));
+                  }
+                },
               ),
             ),
           ],
