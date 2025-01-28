@@ -288,6 +288,9 @@ class _MainState extends State<_MainView> {
       setState(() {
         deviceList = dList;
       });
+      if (selectedComputer == null && dList.length > 0) {
+        selectComputer(context, dList[0]["dId"], pop: false);
+      }
     });
 
     new Timer.periodic(Duration(seconds: 10), (t) {
