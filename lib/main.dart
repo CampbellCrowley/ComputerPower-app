@@ -12,7 +12,6 @@ import 'package:flutter_signin_button/flutter_signin_button.dart';
 import 'package:community_charts_flutter/community_charts_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 
 
