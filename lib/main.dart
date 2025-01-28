@@ -9,9 +9,12 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_signin_button/flutter_signin_button.dart';
-import 'package:charts_flutter/flutter.dart';
+import 'package:community_charts_flutter/community_charts_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
+
 
 void main() {
   runApp(MyApp());
@@ -23,7 +26,7 @@ void signOut(BuildContext context) async {
       context, MaterialPageRoute(builder: (context) => MyHomePage()));
 }
 
-SharedPreferences prefs;
+SharedPreferences? prefs;
 
 class MyApp extends StatelessWidget {
   @override
@@ -53,13 +56,17 @@ class _HomePage extends State<MyHomePage> {
 
   void initializeFlutterFire() async {
     prefs = await SharedPreferences.getInstance();
-    if (prefs.getBool('notifications_enabled') == null) {
-      prefs.setBool('notifications_enabled', true);
+    if (prefs?.getBool('notifications_enabled') == null) {
+      prefs?.setBool('notifications_enabled', true);
     }
     try {
-      await Firebase.initializeApp();
+      WidgetsFlutterBinding.ensureInitialized();
+
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
       setState(() => _initialized = true);
-      FirebaseAuth.instance.authStateChanges().listen((User myUser) {
+      FirebaseAuth.instance.authStateChanges().listen((User? myUser) {
         if (myUser != null) {
           Navigator.pushReplacement(context,
               MaterialPageRoute(builder: (context) => _MainView(myUser)));
@@ -69,7 +76,7 @@ class _HomePage extends State<MyHomePage> {
       const AndroidNotificationChannel channel = AndroidNotificationChannel(
           'power_state_channel',
           'Power State Notifications',
-          'This channel is used to communicate changes in device power states.',
+          description: 'This channel is used to communicate changes in device power states.',
           importance: Importance.max);
 
       final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
@@ -85,10 +92,10 @@ class _HomePage extends State<MyHomePage> {
 
       FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
         SharedPreferences prefs = await SharedPreferences.getInstance();
-        if (!prefs.getBool('notifications_enabled')) return;
+        if (!(prefs.getBool('notifications_enabled') ?? false)) return;
 
-        RemoteNotification notification = message.notification;
-        AndroidNotification android = message.notification?.android;
+        RemoteNotification? notification = message.notification;
+        AndroidNotification? android = message.notification?.android;
         if (notification != null && android != null) {
           flutterLocalNotificationsPlugin.show(
               notification.hashCode,
@@ -98,8 +105,8 @@ class _HomePage extends State<MyHomePage> {
                 android: AndroidNotificationDetails(
                   channel.id,
                   channel.name,
-                  channel.description,
-                  icon: android?.smallIcon,
+                  channelDescription: channel.description,
+                  icon: android.smallIcon,
                 ),
               ));
         }
@@ -151,12 +158,12 @@ class _HomePage extends State<MyHomePage> {
 class _SignInView extends StatelessWidget {
   void signInWithGoogle() async {
     try {
-      final GoogleSignInAccount googleUser = await GoogleSignIn().signIn();
-      final GoogleSignInAuthentication googleAuth =
-          await googleUser.authentication;
-      final GoogleAuthCredential credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
+      final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
+      final GoogleSignInAuthentication? googleAuth =
+          await googleUser?.authentication;
+      final OAuthCredential credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth?.accessToken,
+        idToken: googleAuth?.idToken,
       );
 
       await FirebaseAuth.instance.signInWithCredential(credential);
@@ -180,7 +187,7 @@ class _SignInView extends StatelessWidget {
           children: <Widget>[
             Text(
               'Sign In.',
-              style: Theme.of(context).textTheme.headline4,
+              style: Theme.of(context).textTheme.headlineMedium,
             ),
             SignInButton(Buttons.Google, onPressed: signInWithGoogle),
           ],
@@ -202,10 +209,10 @@ class _MainView extends StatefulWidget {
 class _MainState extends State<_MainView> {
   _MainState();
 
-  String selectedComputer;
+  String? selectedComputer;
   List deviceList = [];
-  Map deviceInfo;
-  String responseMessage;
+  Map? deviceInfo;
+  String? responseMessage;
 
   final Map resetButton = {"button": 'reset'};
   final Map powerButton = {"button": 'power'};
@@ -217,7 +224,7 @@ class _MainState extends State<_MainView> {
       return client.post(
           Uri.parse(
               'https://dev.campbellcrowley.com/pc2/api/$cmd/$selectedComputer'),
-          headers: {'Authorization': token, 'Content-type': 'application/json'},
+          headers: {'Authorization': token!, 'Content-type': 'application/json'},
           body: jsonEncode(body));
     }).then((res) {
       print('$cmd response: ${res.body}');
@@ -240,7 +247,7 @@ class _MainState extends State<_MainView> {
       http.Client client = http.Client();
       return client.get(
           Uri.parse('https://dev.campbellcrowley.com/pc2/api/get-devices'),
-          headers: {'Authorization': token});
+          headers: {'Authorization': token!});
     }).then((res) {
       if (res.statusCode == 200) {
         final parsed = jsonDecode(res.body);
@@ -252,12 +259,12 @@ class _MainState extends State<_MainView> {
     });
   }
 
-  Future<Map> fetchDeviceInfo(String did) async {
+  Future<Map?> fetchDeviceInfo(String did) async {
     return widget.user.getIdToken().then((token) {
       http.Client client = http.Client();
       return client.get(
           Uri.parse('https://dev.campbellcrowley.com/pc2/api/get-info/$did'),
-          headers: {'Authorization': token});
+          headers: {'Authorization': token!});
     }).then((res) {
       if (res.statusCode == 200) {
         final parsed = jsonDecode(res.body);
@@ -278,24 +285,14 @@ class _MainState extends State<_MainView> {
 
   @override
   void initState() {
-    if (widget.user == null) {
-      Future(() => Navigator.pushReplacement(
-          context, MaterialPageRoute(builder: (context) => MyHomePage())));
-    }
     fetchDeviceList().then((dList) {
       setState(() {
         deviceList = dList;
       });
-      if (selectedComputer == null) {
-        String did = deviceList[0]["dId"];
-        print("No device selected, selecting $did");
-        selectComputer(context, did, pop: false);
-      }
     });
 
     new Timer.periodic(Duration(seconds: 10), (t) {
-      if (selectedComputer == null) return;
-      fetchDeviceInfo(selectedComputer).then((dInfo) {
+      fetchDeviceInfo(selectedComputer ?? '').then((dInfo) {
         setState(() {
           deviceInfo = dInfo;
         });
@@ -319,11 +316,11 @@ class _MainState extends State<_MainView> {
     List<Widget> drawer = [
       DrawerHeader(
         child: Text('${widget.user.displayName}\'s Computers',
-            style: Theme.of(context).textTheme.headline4),
+            style: Theme.of(context).textTheme.headlineMedium),
         decoration: BoxDecoration(
           color: Colors.blue,
           image: DecorationImage(
-              image: NetworkImage(widget.user.photoURL), fit: BoxFit.cover),
+              image: NetworkImage(widget.user.photoURL ?? ''), fit: BoxFit.cover),
         ),
       ),
     ];
@@ -354,11 +351,8 @@ class _MainState extends State<_MainView> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.user == null) {
-      return Text("Unknown user...");
-    }
-    Map comp = deviceInfo;
-    Map meta;
+    Map? comp = deviceInfo;
+    Map? meta;
     try {
       meta = deviceList
           .firstWhere((element) => element["dId"] == selectedComputer);
@@ -420,7 +414,7 @@ class _MainState extends State<_MainView> {
               children: [
                 Text(
                   meta == null ? '...' : meta["dName"],
-                  style: Theme.of(context).textTheme.headline4,
+                  style: Theme.of(context).textTheme.headlineMedium,
                 ),
               ],
             ),
@@ -429,7 +423,7 @@ class _MainState extends State<_MainView> {
               children: [
                 Text(
                   ' is currently ',
-                  style: Theme.of(context).textTheme.headline5,
+                  style: Theme.of(context).textTheme.headlineSmall,
                 ),
               ],
             ),
@@ -448,7 +442,7 @@ class _MainState extends State<_MainView> {
                     comp != null
                         ? stateToString(comp["currentState"])
                         : 'Unknown',
-                    style: Theme.of(context).textTheme.headline3,
+                    style: Theme.of(context).textTheme.displaySmall,
                   )
                 ],
               ),
@@ -473,7 +467,7 @@ class _MainState extends State<_MainView> {
                   onPressed: () => sendCommand(
                       'request-state', {"state": curState == 0 ? 1 : 0}),
                   style: ButtonStyle(
-                      backgroundColor: MaterialStateProperty.all(
+                      backgroundColor: WidgetStateProperty.all(
                           curState == 0 ? Colors.green : Colors.red)),
                 ),
               ],
@@ -485,21 +479,21 @@ class _MainState extends State<_MainView> {
                   child: Text('Press Power'),
                   onPressed: () => sendCommand('press-button', powerButton),
                   style: ButtonStyle(
-                      backgroundColor: MaterialStateProperty.all(Colors.green)),
+                      backgroundColor: WidgetStateProperty.all(Colors.green)),
                 ),
                 ElevatedButton(
                   child: Text('Hold Power'),
                   onPressed: () => sendCommand('hold-button', powerButton),
                   style: ButtonStyle(
                       backgroundColor:
-                          MaterialStateProperty.all(Colors.lightGreen)),
+                          WidgetStateProperty.all(Colors.lightGreen)),
                 ),
                 ElevatedButton(
                   child: Text('Press Reset'),
                   onPressed: () => sendCommand('press-button', resetButton),
                   style: ButtonStyle(
                       backgroundColor:
-                          MaterialStateProperty.all(Colors.orange)),
+                          WidgetStateProperty.all(Colors.orange)),
                 ),
               ],
             ),
@@ -514,7 +508,7 @@ class _MainState extends State<_MainView> {
                   child: Text(
                     responseMessage ?? '',
                     textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodyText1,
+                    style: Theme.of(context).textTheme.bodyLarge,
                   ),
                 ),
               ],
@@ -555,11 +549,11 @@ class _SettingsState extends State<_SettingsView> {
             ),
             SwitchListTile(
                 title: const Text('Notifications Enabled'),
-                value: prefs.getBool('notifications_enabled') ?? false,
+                value: prefs?.getBool('notifications_enabled') ?? false,
                 onChanged: (bool value) {
                   print('Toggled notifications ' + (value ? 'On' : 'Off'));
                   setState(() {
-                    prefs.setBool('notifications_enabled', value);
+                    prefs?.setBool('notifications_enabled', value);
                   });
                 }),
             ListTile(
@@ -568,7 +562,7 @@ class _SettingsState extends State<_SettingsView> {
                 onPressed: () async {
                   SharedPreferences prefs =
                       await SharedPreferences.getInstance();
-                  if (!prefs.getBool('notifications_enabled')) {
+                  if (!(prefs.getBool('notifications_enabled') ?? false)) {
                     ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(content: Text('Notifications disabled!')));
                   } else {
@@ -579,7 +573,7 @@ class _SettingsState extends State<_SettingsView> {
                         AndroidNotificationChannel(
                             'power_state_channel',
                             'Power State Notifications',
-                            'This channel is used to communicate changes in device power states.',
+                            description: 'This channel is used to communicate changes in device power states.',
                             importance: Importance.max);
                     await flutterLocalNotificationsPlugin
                         .resolvePlatformSpecificImplementation<
@@ -593,7 +587,7 @@ class _SettingsState extends State<_SettingsView> {
                             android: AndroidNotificationDetails(
                           channel.id,
                           channel.name,
-                          channel.description,
+                          channelDescription: channel.description,
                         )));
                   }
                 },
